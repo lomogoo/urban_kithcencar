@@ -27,6 +27,14 @@
       <button class="tab" data-view="list" role="tab">リスト</button>
       <button class="tab" data-view="fees" role="tab">出店料管理</button>
     </nav>
+    <button id="manage-vendors-btn" class="icon-btn manage-btn" aria-label="出店者を管理" title="出店者を管理">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <line x1="19" y1="8" x2="19" y2="14" />
+        <line x1="22" y1="11" x2="16" y2="11" />
+      </svg>
+    </button>
   </header>
 
   <main class="container">
@@ -40,15 +48,13 @@
         </div>
         <button id="today-btn" class="ghost-btn">今日</button>
         <div class="spacer"></div>
-        <button id="manage-vendors-btn" class="ghost-btn">出店者を管理</button>
-      </div>
-
-      <div class="legend glass">
-        <span class="legend-item"><i class="dot status-open"></i>空き</span>
-        <span class="legend-item"><i class="dot status-one"></i>残り1枠</span>
-        <span class="legend-item"><i class="dot status-full"></i>満員（2者）</span>
-        <span class="legend-item"><i class="dot status-over"></i>要調整（3者以上）</span>
-        <span class="legend-item"><i class="dot status-holiday"></i>休日</span>
+        <div class="legend-inline">
+          <span class="legend-item"><i class="dot status-open"></i>空き</span>
+          <span class="legend-item"><i class="dot status-one"></i>残り1枠</span>
+          <span class="legend-item"><i class="dot status-full"></i>満員</span>
+          <span class="legend-item"><i class="dot status-over"></i>要調整</span>
+          <span class="legend-item"><i class="dot status-holiday"></i>休日</span>
+        </div>
       </div>
 
       <div class="calendar glass">
@@ -75,7 +81,6 @@
         </div>
         <button id="list-today-btn" class="ghost-btn">今日</button>
         <div class="spacer"></div>
-        <button id="list-manage-vendors-btn" class="ghost-btn">出店者を管理</button>
       </div>
 
       <div class="legend glass">
@@ -135,7 +140,6 @@
           <ul id="day-vendor-list" class="chip-list"></ul>
           <div class="add-row">
             <select id="vendor-select" class="select"></select>
-            <button id="add-vendor-to-day" class="primary-btn">追加</button>
           </div>
           <p id="day-hint" class="hint"></p>
         </div>
