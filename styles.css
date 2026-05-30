@@ -14,10 +14,10 @@
   --glass-stroke: rgba(255, 255, 255, 0.65);
   --glass-shadow: 0 12px 40px rgba(20, 30, 60, 0.12);
 
-  --status-open: #34c759;
-  --status-one: #ffcc00;
-  --status-full: #ff453a;
-  --status-over: #af52de;
+  --status-open: #ff453a;   /* 空き（0者）= 赤：要注意 */
+  --status-one: #ffcc00;    /* 残り1枠（1者）= 黄 */
+  --status-full: #ffffff;   /* 満員（2者）= 白：正常 */
+  --status-over: #af52de;   /* 要調整（3者以上）= 紫 */
   --status-holiday: #c7c9ce;
 
   --radius-lg: 26px;
@@ -218,7 +218,7 @@ body { min-height: 100vh; overflow-x: hidden; }
 .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
 .status-open { background: var(--status-open); }
 .status-one { background: var(--status-one); }
-.status-full { background: var(--status-full); }
+.status-full { background: var(--status-full); border: 1px solid rgba(0, 0, 0, 0.18); }
 .status-over { background: var(--status-over); }
 .status-holiday { background: var(--status-holiday); }
 
@@ -271,7 +271,7 @@ body { min-height: 100vh; overflow-x: hidden; }
 }
 .cell.s-open .status-bar { background: var(--status-open); }
 .cell.s-one .status-bar { background: var(--status-one); }
-.cell.s-full .status-bar { background: var(--status-full); }
+.cell.s-full .status-bar { background: var(--status-full); border: 1px solid rgba(0, 0, 0, 0.12); }
 .cell.s-over .status-bar { background: var(--status-over); }
 
 .cell .vendors { display: flex; flex-direction: column; gap: 3px; margin-top: auto; }
@@ -301,7 +301,7 @@ body { min-height: 100vh; overflow-x: hidden; }
 .fees-table tfoot td { font-weight: 700; border-top: 1px solid rgba(0,0,0,0.12); }
 .fees-table .free-badge {
   font-size: 10px;
-  color: var(--status-open);
+  color: #34c759;
   background: rgba(52, 199, 89, 0.14);
   padding: 1px 7px;
   border-radius: 999px;
@@ -373,7 +373,7 @@ body { min-height: 100vh; overflow-x: hidden; }
   box-shadow: 0 2px 6px rgba(0,0,0,0.25);
   transition: transform 0.25s var(--ease);
 }
-.switch:checked { background: var(--status-open); }
+.switch:checked { background: #34c759; }
 .switch:checked::after { transform: translateX(20px); }
 
 .section-label { font-size: 12px; color: var(--ink-3); font-weight: 600; margin-bottom: 10px; }
