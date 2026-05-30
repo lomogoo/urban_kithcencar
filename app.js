@@ -25,6 +25,17 @@ const DEFAULT_VENDORS = [
 const FEE_PER_VISIT = 2000; // 税別
 const FREE_AFTER = 3; // 4回目以降無料 → 課金対象は最大3回
 
+/* 出店料が常に無料の出店者（毎月0円）。
+   表記揺れ（スペース・引用符・大文字小文字）を無視して判定する。 */
+const FEE_EXEMPT_VENDORS = ["Route 227s `Cafe"];
+function normalizeVendorName(name) {
+  return String(name).toLowerCase().replace(/[\s`'’"]/g, "");
+}
+const FEE_EXEMPT_SET = new Set(FEE_EXEMPT_VENDORS.map(normalizeVendorName));
+function isFeeExempt(name) {
+  return FEE_EXEMPT_SET.has(normalizeVendorName(name));
+}
+
 /* 日本の祝日（自動グレー表示用。任意日の休日設定はDBで別管理） */
 const JP_HOLIDAYS = new Set([
   // 2025
@@ -512,15 +523,21 @@ async function renderFees() {
 
   let totalCount = 0, totalFee = 0;
   for (const { v, count } of rows) {
+    const exempt = isFeeExempt(v.name);
     const billable = Math.min(count, FREE_AFTER);
-    const fee = billable * FEE_PER_VISIT;
+    const fee = exempt ? 0 : billable * FEE_PER_VISIT;
     totalCount += count;
     totalFee += fee;
 
     const tr = document.createElement("tr");
     const tdName = document.createElement("td");
     tdName.textContent = v.name;
-    if (count > FREE_AFTER) {
+    if (exempt) {
+      const badge = document.createElement("span");
+      badge.className = "free-badge";
+      badge.textContent = `出店料無料`;
+      tdName.appendChild(badge);
+    } else if (count > FREE_AFTER) {
       const badge = document.createElement("span");
       badge.className = "free-badge";
       badge.textContent = `4回目以降無料`;
@@ -551,6 +568,8 @@ function switchView(view) {
   $("#view-calendar").classList.toggle("active", view === "calendar");
   $("#view-list").classList.toggle("active", view === "list");
   $("#view-fees").classList.toggle("active", view === "fees");
+  // カレンダービューはスクロール不要なので画面内に収める（リスト/出店料はスクロール可）
+  document.body.classList.toggle("calendar-view", view === "calendar");
   if (view === "fees") renderFees();
   if (view === "list") renderList();
 }
@@ -631,6 +650,7 @@ async function init() {
   state.calYear = state.feeYear = now.getFullYear();
   state.calMonth = state.feeMonth = now.getMonth();
 
+  document.body.classList.add("calendar-view"); // 初期表示はカレンダー
   wireEvents();
 
   try {
