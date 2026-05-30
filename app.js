@@ -328,19 +328,22 @@ function renderVendorSelect() {
   const used = (state.openings[state.selectedDate] || []).map((o) => o.vendor_id);
   sel.innerHTML = "";
   const available = state.vendors.filter((v) => !used.includes(v.id));
-  if (available.length === 0) {
+
+  // 先頭は空のプレースホルダ（初期値は未選択）
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = available.length === 0 ? "追加できる出店者がありません" : "出店者を選択して追加…";
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  sel.appendChild(placeholder);
+
+  for (const v of available) {
     const opt = document.createElement("option");
-    opt.textContent = "追加できる出店者がありません";
-    opt.disabled = true;
+    opt.value = v.id;
+    opt.textContent = v.name;
     sel.appendChild(opt);
-  } else {
-    for (const v of available) {
-      const opt = document.createElement("option");
-      opt.value = v.id;
-      opt.textContent = v.name;
-      sel.appendChild(opt);
-    }
   }
+  sel.disabled = available.length === 0;
 }
 
 function renderDayVendorList() {
@@ -369,7 +372,6 @@ function renderDayVendorList() {
   }
 
   const hint = $("#day-hint");
-  const addBtn = $("#add-vendor-to-day");
   if (list.length >= 2) {
     hint.textContent = list.length >= 3
       ? "⚠️ 3者以上が登録されています。調整が必要です。"
@@ -377,8 +379,6 @@ function renderDayVendorList() {
   } else {
     hint.textContent = `あと ${2 - list.length} 枠 空いています。`;
   }
-  addBtn.disabled = state.vendors.length === 0 ||
-    (state.openings[state.selectedDate] || []).length >= state.vendors.length;
 }
 
 async function addOpeningToDay() {
@@ -619,7 +619,6 @@ function wireEvents() {
   $("#list-prev-month").addEventListener("click", () => changeCalMonth(-1));
   $("#list-next-month").addEventListener("click", () => changeCalMonth(1));
   $("#list-today-btn").addEventListener("click", goToday);
-  $("#list-manage-vendors-btn").addEventListener("click", openVendorModal);
 
   $("#fee-prev-month").addEventListener("click", () => changeFeeMonth(-1));
   $("#fee-next-month").addEventListener("click", () => changeFeeMonth(1));
@@ -628,7 +627,8 @@ function wireEvents() {
   $("#add-vendor-btn").addEventListener("click", addVendor);
   $("#new-vendor-name").addEventListener("keydown", (e) => { if (e.key === "Enter") addVendor(); });
 
-  $("#add-vendor-to-day").addEventListener("click", addOpeningToDay);
+  // 出店者を選択したら即追加（追加ボタンを廃止しUXを向上）
+  $("#vendor-select").addEventListener("change", addOpeningToDay);
   $("#holiday-toggle").addEventListener("change", (e) => toggleHoliday(e.target.checked));
 
   // モーダルを閉じる

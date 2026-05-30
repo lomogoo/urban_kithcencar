@@ -132,6 +132,15 @@ body { min-height: 100vh; overflow-x: hidden; }
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
+/* ヘッダー右上の「出店者を管理」アイコンボタン */
+.manage-btn {
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(120, 120, 128, 0.25);
+  color: var(--ink-2);
+  flex: 0 0 auto;
+}
+.manage-btn:hover { background: rgba(255, 255, 255, 0.85); }
+
 /* ---------- Layout ---------- */
 .container { max-width: 980px; margin: 0 auto; padding: 0 14px 60px; }
 .view { display: none; animation: fade 0.4s var(--ease); }
@@ -216,6 +225,18 @@ body { min-height: 100vh; overflow-x: hidden; }
 }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+
+/* ツールバーに統合した凡例（カレンダービューの高さ節約） */
+.legend-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.legend-inline .legend-item { gap: 5px; }
+.legend-inline .dot { width: 10px; height: 10px; }
 .status-open { background: var(--status-open); }
 .status-one { background: var(--status-one); }
 .status-full { background: var(--status-full); border: 1px solid rgba(0, 0, 0, 0.18); }
@@ -573,13 +594,26 @@ body.calendar-view .cell { min-height: 0; }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 680px) {
-  .app-header { flex-direction: column; align-items: stretch; gap: 12px; margin: 10px; padding: 12px 14px; }
-  .tabs { width: 100%; }
+  /* モバイルは2行グリッド：1行目[ブランド｜管理アイコン]、2行目[タブ] */
+  .app-header {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "brand manage" "tabs tabs";
+    align-items: center;
+    gap: 10px 12px;
+    margin: 10px;
+    padding: 12px 14px;
+  }
+  .brand { grid-area: brand; min-width: 0; }
+  .brand-text h1, .brand-text p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .manage-btn { grid-area: manage; }
+  .tabs { grid-area: tabs; width: 100%; }
   .tab { flex: 1; padding: 8px 6px; }
   .month-nav h2 { font-size: 17px; min-width: 110px; }
   .fee-note { width: 100%; }
   .fees-table th, .fees-table td { padding: 12px 10px; font-size: 13px; }
   .legend { gap: 12px; font-size: 11.5px; }
+  .legend-inline { width: 100%; justify-content: flex-start; }
 }
 
 /* スマホのカレンダー：Googleカレンダー風に「マス幅いっぱいの細い帯＋小フォント」 */
@@ -597,10 +631,9 @@ body.calendar-view .cell { min-height: 0; }
   }
   .cell:hover { transform: none; box-shadow: none; }
   .cell .date { font-size: 11px; padding-left: 2px; }
-  .cell .status-bar { display: none; } /* 帯自体を色付けするのでバーは省略 */
 
   .cell .vendors { gap: 1px; margin-top: 2px; }
-  /* 店名を「マス幅いっぱいの帯」として表示。端で省略するが文字は最大限見せる */
+  /* 店名は白の帯で表示。状態は status-bar（色の線）で表現する */
   .cell .v-tag {
     font-size: 9.5px;
     line-height: 1.35;
@@ -611,10 +644,6 @@ body.calendar-view .cell { min-height: 0; }
     background: rgba(255, 255, 255, 0.92);
     color: var(--ink);
   }
-  /* マスの状態色を帯に反映 */
-  .cell.s-one  .v-tag { background: rgba(255, 204, 0, 0.28); }
-  .cell.s-full .v-tag { background: rgba(0, 0, 0, 0.05); }
-  .cell.s-over .v-tag { background: rgba(175, 82, 222, 0.22); }
 
   .cell .holiday-tag { font-size: 10px; }
   .legend { gap: 10px 14px; font-size: 11px; padding: 10px 14px; }
