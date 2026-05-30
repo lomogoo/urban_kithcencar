@@ -24,6 +24,7 @@
     </div>
     <nav class="tabs" role="tablist">
       <button class="tab active" data-view="calendar" role="tab">カレンダー</button>
+      <button class="tab" data-view="list" role="tab">リスト</button>
       <button class="tab" data-view="fees" role="tab">出店料管理</button>
     </nav>
   </header>
@@ -62,6 +63,30 @@
         </div>
         <div id="calendar-grid" class="grid"></div>
       </div>
+    </section>
+
+    <!-- ============ LIST VIEW ============ -->
+    <section id="view-list" class="view">
+      <div class="toolbar glass">
+        <div class="month-nav">
+          <button id="list-prev-month" class="icon-btn" aria-label="前の月">‹</button>
+          <h2 id="list-month-label">—</h2>
+          <button id="list-next-month" class="icon-btn" aria-label="次の月">›</button>
+        </div>
+        <button id="list-today-btn" class="ghost-btn">今日</button>
+        <div class="spacer"></div>
+        <button id="list-manage-vendors-btn" class="ghost-btn">出店者を管理</button>
+      </div>
+
+      <div class="legend glass">
+        <span class="legend-item"><i class="dot status-open"></i>空き</span>
+        <span class="legend-item"><i class="dot status-one"></i>残り1枠</span>
+        <span class="legend-item"><i class="dot status-full"></i>満員（2者）</span>
+        <span class="legend-item"><i class="dot status-over"></i>要調整（3者以上）</span>
+        <span class="legend-item"><i class="dot status-holiday"></i>休日</span>
+      </div>
+
+      <div id="list-container" class="list-container glass"></div>
     </section>
 
     <!-- ============ FEES VIEW ============ -->

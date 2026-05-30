@@ -217,6 +217,86 @@ function appendVendorTags(cell, list) {
   cell.appendChild(wrap);
 }
 
+/* ---------------- List view rendering ---------------- */
+const STATUS_LABEL = {
+  "s-open": "空き",
+  "s-one": "残り1枠",
+  "s-full": "満員（2者）",
+  "s-over": "要調整（3者以上）",
+};
+
+function renderList() {
+  $("#list-month-label").textContent = monthLabel(state.calYear, state.calMonth);
+  const wrap = $("#list-container");
+  wrap.innerHTML = "";
+
+  const y = state.calYear, m0 = state.calMonth;
+  const daysInMonth = new Date(y, m0 + 1, 0).getDate();
+  const dows = ["日", "月", "火", "水", "木", "金", "土"];
+  let shown = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = ymd(y, m0, d);
+    const dow = dayOfWeek(y, m0, d);
+    const weekend = dow === 0 || dow === 6;
+    const isHoliday = state.holidays.has(dateStr) || JP_HOLIDAYS.has(dateStr) || weekend;
+    const list = state.openings[dateStr] || [];
+
+    // 休日かつ出店なしの日はリストでは省略（出店のある日と平日のみ表示）
+    if (isHoliday && list.length === 0) continue;
+    shown++;
+
+    const row = document.createElement("div");
+    row.className = "list-row";
+    row.dataset.date = dateStr;
+
+    const dateCol = document.createElement("div");
+    dateCol.className = "list-date";
+    if (dow === 0) dateCol.classList.add("sun-date");
+    if (dow === 6) dateCol.classList.add("sat-date");
+    if (dateStr === todayStr()) dateCol.classList.add("is-today");
+    dateCol.innerHTML = `<span class="ld-num">${d}</span><span class="ld-dow">${dows[dow]}</span>`;
+    row.appendChild(dateCol);
+
+    const body = document.createElement("div");
+    body.className = "list-body";
+
+    const statusCls = isHoliday ? "s-holiday" : statusClass(list.length);
+    const badge = document.createElement("span");
+    badge.className = "list-status " + statusCls;
+    badge.textContent = isHoliday ? "休日" : STATUS_LABEL[statusCls];
+    body.appendChild(badge);
+
+    if (list.length > 0) {
+      const names = document.createElement("div");
+      names.className = "list-vendors";
+      for (const o of list) {
+        const chip = document.createElement("span");
+        chip.className = "list-vendor";
+        chip.textContent = vendorName(o.vendor_id);
+        names.appendChild(chip);
+      }
+      body.appendChild(names);
+    } else if (!isHoliday) {
+      const empty = document.createElement("span");
+      empty.className = "list-empty";
+      empty.textContent = "出店者なし";
+      body.appendChild(empty);
+    }
+
+    row.appendChild(body);
+    row.addEventListener("click", () => openDayModal(dateStr));
+    wrap.appendChild(row);
+  }
+
+  if (shown === 0) {
+    const e = document.createElement("div");
+    e.className = "fees-empty";
+    e.textContent = "この月の出店予定はありません";
+    wrap.appendChild(e);
+  }
+}
+
 /* ---------------- Day modal ---------------- */
 function openDayModal(dateStr) {
   state.selectedDate = dateStr;
@@ -312,7 +392,7 @@ async function addOpeningToDay() {
   (state.openings[date] ||= []).push({ id: data.id, vendor_id: data.vendor_id });
   renderDayVendorList();
   renderVendorSelect();
-  renderCalendar();
+  refreshCalendarViews();
   toast("出店者を追加しました");
 }
 
@@ -324,7 +404,7 @@ async function removeOpening(openingId) {
   if (state.openings[date].length === 0) delete state.openings[date];
   renderDayVendorList();
   renderVendorSelect();
-  renderCalendar();
+  refreshCalendarViews();
   toast("削除しました");
 }
 
@@ -341,7 +421,7 @@ async function toggleHoliday(checked) {
     state.holidays.delete(date);
     toast("休日設定を解除しました");
   }
-  renderCalendar();
+  refreshCalendarViews();
 }
 
 /* ---------------- Vendor manager ---------------- */
@@ -391,7 +471,7 @@ async function deleteVendor(v) {
   state.vendors = state.vendors.filter((x) => x.id !== v.id);
   renderVendorManageList();
   await loadMonthData(state.calYear, state.calMonth);
-  renderCalendar();
+  refreshCalendarViews();
   toast("削除しました");
 }
 
@@ -469,8 +549,16 @@ function switchView(view) {
   state.view = view;
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === view));
   $("#view-calendar").classList.toggle("active", view === "calendar");
+  $("#view-list").classList.toggle("active", view === "list");
   $("#view-fees").classList.toggle("active", view === "fees");
   if (view === "fees") renderFees();
+  if (view === "list") renderList();
+}
+
+/* カレンダーとリストの両方を更新（同じ月データを共有） */
+function refreshCalendarViews() {
+  renderCalendar();
+  if (state.view === "list") renderList();
 }
 
 async function changeCalMonth(delta) {
@@ -480,7 +568,15 @@ async function changeCalMonth(delta) {
   if (m > 11) { m = 0; y++; }
   state.calYear = y; state.calMonth = m;
   await loadMonthData(y, m);
-  renderCalendar();
+  refreshCalendarViews();
+}
+
+async function goToday() {
+  const t = new Date();
+  state.calYear = t.getFullYear();
+  state.calMonth = t.getMonth();
+  await loadMonthData(state.calYear, state.calMonth);
+  refreshCalendarViews();
 }
 
 function changeFeeMonth(delta) {
@@ -498,13 +594,13 @@ function wireEvents() {
 
   $("#prev-month").addEventListener("click", () => changeCalMonth(-1));
   $("#next-month").addEventListener("click", () => changeCalMonth(1));
-  $("#today-btn").addEventListener("click", async () => {
-    const t = new Date();
-    state.calYear = t.getFullYear();
-    state.calMonth = t.getMonth();
-    await loadMonthData(state.calYear, state.calMonth);
-    renderCalendar();
-  });
+  $("#today-btn").addEventListener("click", goToday);
+
+  // リストビューのツールバー（カレンダーと同じ月データを共有）
+  $("#list-prev-month").addEventListener("click", () => changeCalMonth(-1));
+  $("#list-next-month").addEventListener("click", () => changeCalMonth(1));
+  $("#list-today-btn").addEventListener("click", goToday);
+  $("#list-manage-vendors-btn").addEventListener("click", openVendorModal);
 
   $("#fee-prev-month").addEventListener("click", () => changeFeeMonth(-1));
   $("#fee-next-month").addEventListener("click", () => changeFeeMonth(1));

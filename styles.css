@@ -310,6 +310,80 @@ body { min-height: 100vh; overflow-x: hidden; }
 }
 .fees-empty { text-align: center; color: var(--ink-3); padding: 40px; font-size: 14px; }
 
+/* ---------- List view ---------- */
+.list-container { padding: 6px; overflow: hidden; }
+.list-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.18s var(--ease);
+}
+.list-row:not(:last-child) { border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
+.list-row:hover { background: rgba(120, 120, 128, 0.08); }
+
+.list-date {
+  flex: 0 0 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+}
+.list-date .ld-num { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; line-height: 1; }
+.list-date .ld-dow { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+.list-date.sun-date .ld-num, .list-date.sun-date .ld-dow { color: #ff453a; }
+.list-date.sat-date .ld-num, .list-date.sat-date .ld-dow { color: #0a84ff; }
+.list-date.is-today {
+  background: var(--accent);
+  border-radius: 12px;
+  padding: 4px 0;
+}
+.list-date.is-today .ld-num,
+.list-date.is-today .ld-dow { color: #fff; }
+
+.list-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  justify-content: center;
+}
+.list-status {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: #fff;
+}
+.list-status.s-open { background: var(--status-open); }
+.list-status.s-one  { background: var(--status-one); color: #6b5800; }
+.list-status.s-full { background: #8e8e93; }
+.list-status.s-over { background: var(--status-over); }
+.list-status.s-holiday { background: var(--status-holiday); color: var(--ink-2); }
+
+.list-vendors { display: flex; flex-wrap: wrap; gap: 6px; }
+.list-vendor {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(120, 120, 128, 0.12);
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+.list-empty { font-size: 13px; color: var(--ink-3); }
+
+@media (max-width: 560px) {
+  .list-row { padding: 11px 8px; gap: 10px; }
+  .list-date { flex-basis: 40px; }
+  .list-date .ld-num { font-size: 18px; }
+  .list-vendor { font-size: 13px; padding: 4px 9px; }
+}
+
 /* ---------- Modals ---------- */
 .modal-overlay {
   position: fixed;
@@ -466,17 +540,47 @@ body { min-height: 100vh; overflow-x: hidden; }
 @media (max-width: 680px) {
   .app-header { flex-direction: column; align-items: stretch; gap: 12px; margin: 10px; padding: 12px 14px; }
   .tabs { width: 100%; }
-  .tab { flex: 1; }
-  .cell { min-height: 72px; padding: 6px; }
-  .grid, .weekdays { gap: 5px; }
-  .cell .v-tag { font-size: 9px; padding: 1px 4px; }
+  .tab { flex: 1; padding: 8px 6px; }
   .month-nav h2 { font-size: 17px; min-width: 110px; }
   .fee-note { width: 100%; }
   .fees-table th, .fees-table td { padding: 12px 10px; font-size: 13px; }
   .legend { gap: 12px; font-size: 11.5px; }
 }
-@media (max-width: 420px) {
-  .cell .vendors { display: none; }
-  .cell { min-height: 54px; align-items: center; }
-  .cell .date { font-size: 12px; }
+
+/* スマホのカレンダー：Googleカレンダー風に「マス幅いっぱいの細い帯＋小フォント」 */
+@media (max-width: 560px) {
+  .container { padding: 0 6px 50px; }
+  .calendar { padding: 6px; }
+  .grid, .weekdays { gap: 2px; }
+  .wd { font-size: 10px; padding: 2px 0; }
+
+  .cell {
+    min-height: 76px;
+    padding: 3px 2px 2px;
+    border-radius: 7px;
+    gap: 2px;
+  }
+  .cell:hover { transform: none; box-shadow: none; }
+  .cell .date { font-size: 11px; padding-left: 2px; }
+  .cell .status-bar { display: none; } /* 帯自体を色付けするのでバーは省略 */
+
+  .cell .vendors { gap: 1px; margin-top: 2px; }
+  /* 店名を「マス幅いっぱいの帯」として表示。端で省略するが文字は最大限見せる */
+  .cell .v-tag {
+    font-size: 9.5px;
+    line-height: 1.35;
+    font-weight: 600;
+    border-radius: 3px;
+    padding: 1px 3px;
+    border: none;
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--ink);
+  }
+  /* マスの状態色を帯に反映 */
+  .cell.s-one  .v-tag { background: rgba(255, 204, 0, 0.28); }
+  .cell.s-full .v-tag { background: rgba(0, 0, 0, 0.05); }
+  .cell.s-over .v-tag { background: rgba(175, 82, 222, 0.22); }
+
+  .cell .holiday-tag { font-size: 10px; }
+  .legend { gap: 10px 14px; font-size: 11px; padding: 10px 14px; }
 }
