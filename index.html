@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a84ff" />
+  <title>アーバンネット キッチンカー スケジュール</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="blob blob-1"></span>
+    <span class="blob blob-2"></span>
+    <span class="blob blob-3"></span>
+  </div>
+
+  <header class="app-header glass">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">UN</div>
+      <div class="brand-text">
+        <h1>アーバンネット</h1>
+        <p>キッチンカー出店スケジュール</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="calendar" role="tab">カレンダー</button>
+      <button class="tab" data-view="fees" role="tab">出店料管理</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <!-- ============ CALENDAR VIEW ============ -->
+    <section id="view-calendar" class="view active">
+      <div class="toolbar glass">
+        <div class="month-nav">
+          <button id="prev-month" class="icon-btn" aria-label="前の月">‹</button>
+          <h2 id="month-label">—</h2>
+          <button id="next-month" class="icon-btn" aria-label="次の月">›</button>
+        </div>
+        <button id="today-btn" class="ghost-btn">今日</button>
+        <div class="spacer"></div>
+        <button id="manage-vendors-btn" class="ghost-btn">出店者を管理</button>
+      </div>
+
+      <div class="legend glass">
+        <span class="legend-item"><i class="dot status-open"></i>空き</span>
+        <span class="legend-item"><i class="dot status-one"></i>残り1枠</span>
+        <span class="legend-item"><i class="dot status-full"></i>満員（2者）</span>
+        <span class="legend-item"><i class="dot status-over"></i>要調整（3者以上）</span>
+        <span class="legend-item"><i class="dot status-holiday"></i>休日</span>
+      </div>
+
+      <div class="calendar glass">
+        <div class="weekdays">
+          <div class="wd sun">日</div>
+          <div class="wd">月</div>
+          <div class="wd">火</div>
+          <div class="wd">水</div>
+          <div class="wd">木</div>
+          <div class="wd">金</div>
+          <div class="wd sat">土</div>
+        </div>
+        <div id="calendar-grid" class="grid"></div>
+      </div>
+    </section>
+
+    <!-- ============ FEES VIEW ============ -->
+    <section id="view-fees" class="view">
+      <div class="toolbar glass">
+        <div class="month-nav">
+          <button id="fee-prev-month" class="icon-btn" aria-label="前の月">‹</button>
+          <h2 id="fee-month-label">—</h2>
+          <button id="fee-next-month" class="icon-btn" aria-label="次の月">›</button>
+        </div>
+        <div class="spacer"></div>
+        <div class="fee-note">出店料：1回 2,000円（税別） / 4回目以降 無料（月上限 6,000円）</div>
+      </div>
+
+      <div class="fees-card glass">
+        <table class="fees-table">
+          <thead>
+            <tr>
+              <th>出店者</th>
+              <th class="num">出店回数</th>
+              <th class="num">出店料（税別）</th>
+            </tr>
+          </thead>
+          <tbody id="fees-body"></tbody>
+          <tfoot id="fees-foot"></tfoot>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ DAY MODAL ============ -->
+  <div id="day-modal" class="modal-overlay" hidden>
+    <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="day-modal-title">
+      <header class="modal-head">
+        <h3 id="day-modal-title">—</h3>
+        <button class="icon-btn modal-close" data-close aria-label="閉じる">×</button>
+      </header>
+      <div class="modal-body">
+        <label class="toggle-row">
+          <span>休日（出店なし）に設定</span>
+          <input type="checkbox" id="holiday-toggle" class="switch" />
+        </label>
+
+        <div id="vendor-section">
+          <div class="section-label">出店者（最大2者）</div>
+          <ul id="day-vendor-list" class="chip-list"></ul>
+          <div class="add-row">
+            <select id="vendor-select" class="select"></select>
+            <button id="add-vendor-to-day" class="primary-btn">追加</button>
+          </div>
+          <p id="day-hint" class="hint"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ VENDOR MANAGER MODAL ============ -->
+  <div id="vendor-modal" class="modal-overlay" hidden>
+    <div class="modal glass" role="dialog" aria-modal="true" aria-labelledby="vendor-modal-title">
+      <header class="modal-head">
+        <h3 id="vendor-modal-title">出店者の管理</h3>
+        <button class="icon-btn modal-close" data-close aria-label="閉じる">×</button>
+      </header>
+      <div class="modal-body">
+        <div class="add-row">
+          <input type="text" id="new-vendor-name" class="text-input" placeholder="新しい出店者名" />
+          <button id="add-vendor-btn" class="primary-btn">追加</button>
+        </div>
+        <ul id="vendor-manage-list" class="manage-list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
