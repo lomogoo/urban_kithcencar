@@ -15,10 +15,17 @@ create table if not exists public.openings (
   id            bigint generated always as identity primary key,
   opening_date  date not null,
   vendor_id     bigint not null references public.vendors(id) on delete cascade,
+  fee_free      boolean not null default false,  -- その出店者・その日を出店料無料にする（無料募集日）
+  sales         integer,                          -- 売上実績（円）。未入力はNULL
   created_at    timestamptz not null default now(),
   unique (opening_date, vendor_id)
 );
 create index if not exists openings_date_idx on public.openings (opening_date);
+
+-- 既存の openings テーブルがある場合のカラム追加（再実行しても安全）
+alter table public.openings
+  add column if not exists fee_free boolean not null default false,
+  add column if not exists sales    integer;
 
 -- 3) 休日テーブル（任意の日を「出店なし」に指定）
 create table if not exists public.holidays (
