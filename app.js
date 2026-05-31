@@ -128,11 +128,22 @@ function monthRange(y, m0) {
   return { start, end };
 }
 
+const OPENING_COLS = "id, opening_date, vendor_id, fee_free, sales";
+
+function normalizeOpening(row) {
+  return {
+    id: row.id,
+    vendor_id: row.vendor_id,
+    fee_free: row.fee_free ?? false,
+    sales: row.sales ?? null,
+  };
+}
+
 async function loadMonthData(y, m0) {
   const { start, end } = monthRange(y, m0);
 
   const [openRes, holRes] = await Promise.all([
-    sb.from("openings").select("id, opening_date, vendor_id").gte("opening_date", start).lte("opening_date", end),
+    sb.from("openings").select(OPENING_COLS).gte("opening_date", start).lte("opening_date", end).order("opening_date"),
     sb.from("holidays").select("holiday_date").gte("holiday_date", start).lte("holiday_date", end),
   ]);
   if (openRes.error) throw openRes.error;
@@ -140,10 +151,23 @@ async function loadMonthData(y, m0) {
 
   const openings = {};
   for (const row of openRes.data) {
-    (openings[row.opening_date] ||= []).push({ id: row.id, vendor_id: row.vendor_id });
+    (openings[row.opening_date] ||= []).push(normalizeOpening(row));
   }
   state.openings = openings;
   state.holidays = new Set(holRes.data.map((r) => r.holiday_date));
+}
+
+/* 月内の出店を日付順のフラットな配列で取得（料金・Excel計算用） */
+async function fetchMonthOpenings(y, m0) {
+  const { start, end } = monthRange(y, m0);
+  const { data, error } = await sb
+    .from("openings")
+    .select(OPENING_COLS)
+    .gte("opening_date", start)
+    .lte("opening_date", end)
+    .order("opening_date");
+  if (error) throw error;
+  return data.map((r) => ({ ...normalizeOpening(r), opening_date: r.opening_date }));
 }
 
 /* ---------------- Calendar rendering ---------------- */
@@ -359,14 +383,56 @@ function renderDayVendorList() {
   } else {
     for (const o of list) {
       const li = document.createElement("li");
+      li.className = "vendor-entry";
+
+      const head = document.createElement("div");
+      head.className = "ve-head";
       const span = document.createElement("span");
+      span.className = "ve-name";
       span.textContent = vendorName(o.vendor_id);
       const btn = document.createElement("button");
       btn.className = "remove";
       btn.textContent = "×";
       btn.title = "削除";
       btn.addEventListener("click", () => removeOpening(o.id));
-      li.append(span, btn);
+      head.append(span, btn);
+      li.appendChild(head);
+
+      // 出店料無料トグル（この日のこの出店者を無料にする）
+      const feeRow = document.createElement("label");
+      feeRow.className = "ve-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "ve-check";
+      cb.checked = !!o.fee_free;
+      cb.addEventListener("change", () => setOpeningFeeFree(o, cb.checked));
+      const feeLabel = document.createElement("span");
+      feeLabel.textContent = "この日の出店料を無料にする";
+      feeRow.append(cb, feeLabel);
+      li.appendChild(feeRow);
+
+      // 売上実績の入力
+      const salesRow = document.createElement("div");
+      salesRow.className = "ve-row ve-sales";
+      const sLabel = document.createElement("span");
+      sLabel.textContent = "売上実績";
+      const sInput = document.createElement("input");
+      sInput.type = "number";
+      sInput.inputMode = "numeric";
+      sInput.min = "0";
+      sInput.step = "1";
+      sInput.placeholder = "未入力";
+      sInput.className = "ve-sales-input";
+      sInput.value = o.sales == null ? "" : o.sales;
+      const yen = document.createElement("span");
+      yen.className = "ve-yen";
+      yen.textContent = "円";
+      const save = () => setOpeningSales(o, sInput.value);
+      sInput.addEventListener("change", save);
+      sInput.addEventListener("blur", save);
+      salesRow.append(sLabel, sInput, yen);
+      li.appendChild(salesRow);
+
       ul.appendChild(li);
     }
   }
@@ -379,6 +445,35 @@ function renderDayVendorList() {
   } else {
     hint.textContent = `あと ${2 - list.length} 枠 空いています。`;
   }
+}
+
+async function setOpeningFeeFree(opening, checked) {
+  const prev = opening.fee_free;
+  opening.fee_free = checked;
+  const { error } = await sb.from("openings").update({ fee_free: checked }).eq("id", opening.id);
+  if (error) {
+    opening.fee_free = prev;
+    renderDayVendorList();
+    toast("更新に失敗しました：" + error.message, true);
+    return;
+  }
+  toast(checked ? "出店料を無料にしました" : "通常料金に戻しました");
+}
+
+async function setOpeningSales(opening, raw) {
+  const trimmed = String(raw).trim();
+  const value = trimmed === "" ? null : Math.max(0, Math.round(Number(trimmed)));
+  if (value != null && !Number.isFinite(value)) { toast("売上は数値で入力してください", true); return; }
+  if (value === opening.sales) return; // 変化なし
+  const prev = opening.sales;
+  opening.sales = value;
+  const { error } = await sb.from("openings").update({ sales: value }).eq("id", opening.id);
+  if (error) {
+    opening.sales = prev;
+    toast("売上の保存に失敗しました：" + error.message, true);
+    return;
+  }
+  toast("売上を保存しました");
 }
 
 async function addOpeningToDay() {
@@ -396,11 +491,11 @@ async function addOpeningToDay() {
   const { data, error } = await sb
     .from("openings")
     .insert({ opening_date: date, vendor_id: vendorId })
-    .select("id, vendor_id")
+    .select(OPENING_COLS)
     .single();
   if (error) { toast("追加に失敗しました：" + error.message, true); return; }
 
-  (state.openings[date] ||= []).push({ id: data.id, vendor_id: data.vendor_id });
+  (state.openings[date] ||= []).push(normalizeOpening(data));
   renderDayVendorList();
   renderVendorSelect();
   refreshCalendarViews();
@@ -486,6 +581,46 @@ async function deleteVendor(v) {
   toast("削除しました");
 }
 
+/* ---------------- Fee computation (shared) ----------------
+   各出店者の月内の出店を日付順に走査し、1回ごとの料金を決定する。
+   ルール：
+   - 出店者が常時無料（isFeeExempt）→ 全回0円
+   - その回が fee_free（無料募集日）→ 0円。かつ「課金回数」にカウントしない
+   - 通常回は4回目（FREE_AFTER超）から無料
+   返り値：vendorId -> { count, fee, perVisit:[{date, fee, free}] }
+*/
+function computeFees(openingsFlat) {
+  const byVendor = new Map();
+  for (const o of openingsFlat) {
+    if (!byVendor.has(o.vendor_id)) byVendor.set(o.vendor_id, []);
+    byVendor.get(o.vendor_id).push(o);
+  }
+
+  const result = new Map();
+  for (const [vendorId, list] of byVendor) {
+    list.sort((a, b) => a.opening_date.localeCompare(b.opening_date));
+    const exempt = isFeeExempt(vendorName(vendorId));
+    let billableSoFar = 0;
+    let fee = 0;
+    const perVisit = [];
+    for (const o of list) {
+      let visitFee = 0;
+      let free = true;
+      if (exempt || o.fee_free) {
+        visitFee = 0; // 課金回数にカウントしない
+      } else if (billableSoFar < FREE_AFTER) {
+        visitFee = FEE_PER_VISIT;
+        billableSoFar++;
+        free = false;
+      } // else: 4回目以降は無料
+      fee += visitFee;
+      perVisit.push({ date: o.opening_date, fee: visitFee, free });
+    }
+    result.set(vendorId, { count: list.length, fee, perVisit, exempt });
+  }
+  return result;
+}
+
 /* ---------------- Fees view ---------------- */
 async function renderFees() {
   $("#fee-month-label").textContent = monthLabel(state.feeYear, state.feeMonth);
@@ -494,21 +629,19 @@ async function renderFees() {
   body.innerHTML = "";
   foot.innerHTML = "";
 
-  const { start, end } = monthRange(state.feeYear, state.feeMonth);
-  const { data, error } = await sb
-    .from("openings")
-    .select("vendor_id")
-    .gte("opening_date", start)
-    .lte("opening_date", end);
-  if (error) { toast("読み込みに失敗しました：" + error.message, true); return; }
+  let openingsFlat;
+  try {
+    openingsFlat = await fetchMonthOpenings(state.feeYear, state.feeMonth);
+  } catch (err) {
+    toast("読み込みに失敗しました：" + err.message, true);
+    return;
+  }
 
-  const counts = {};
-  for (const row of data) counts[row.vendor_id] = (counts[row.vendor_id] || 0) + 1;
-
+  const fees = computeFees(openingsFlat);
   const rows = state.vendors
-    .map((v) => ({ v, count: counts[v.id] || 0 }))
-    .filter((r) => r.count > 0)
-    .sort((a, b) => b.count - a.count);
+    .map((v) => ({ v, info: fees.get(v.id) }))
+    .filter((r) => r.info && r.info.count > 0)
+    .sort((a, b) => b.info.count - a.info.count);
 
   if (rows.length === 0) {
     const tr = document.createElement("tr");
@@ -522,33 +655,25 @@ async function renderFees() {
   }
 
   let totalCount = 0, totalFee = 0;
-  for (const { v, count } of rows) {
-    const exempt = isFeeExempt(v.name);
-    const billable = Math.min(count, FREE_AFTER);
-    const fee = exempt ? 0 : billable * FEE_PER_VISIT;
-    totalCount += count;
-    totalFee += fee;
+  for (const { v, info } of rows) {
+    const freeCount = info.perVisit.filter((p) => p.free).length;
+    totalCount += info.count;
+    totalFee += info.fee;
 
     const tr = document.createElement("tr");
     const tdName = document.createElement("td");
     tdName.textContent = v.name;
-    if (exempt) {
-      const badge = document.createElement("span");
-      badge.className = "free-badge";
-      badge.textContent = `出店料無料`;
-      tdName.appendChild(badge);
-    } else if (count > FREE_AFTER) {
-      const badge = document.createElement("span");
-      badge.className = "free-badge";
-      badge.textContent = `4回目以降無料`;
-      tdName.appendChild(badge);
+    if (info.exempt) {
+      tdName.appendChild(makeBadge("出店料無料"));
+    } else if (freeCount > 0) {
+      tdName.appendChild(makeBadge(`無料 ${freeCount}回`));
     }
     const tdCount = document.createElement("td");
     tdCount.className = "num";
-    tdCount.textContent = `${count} 回`;
+    tdCount.textContent = `${info.count} 回`;
     const tdFee = document.createElement("td");
     tdFee.className = "num";
-    tdFee.textContent = `¥${fee.toLocaleString()}`;
+    tdFee.textContent = `¥${info.fee.toLocaleString()}`;
     tr.append(tdName, tdCount, tdFee);
     body.appendChild(tr);
   }
@@ -561,6 +686,364 @@ async function renderFees() {
   foot.appendChild(tr);
 }
 
+function makeBadge(text) {
+  const badge = document.createElement("span");
+  badge.className = "free-badge";
+  badge.textContent = text;
+  return badge;
+}
+
+/* ---------------- Lazy script loader（出力ライブラリは押下時のみ読込） ---------------- */
+const _loadedScripts = {};
+function loadScript(src) {
+  if (_loadedScripts[src]) return _loadedScripts[src];
+  _loadedScripts[src] = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => { delete _loadedScripts[src]; reject(new Error("読み込み失敗: " + src)); };
+    document.head.appendChild(s);
+  });
+  return _loadedScripts[src];
+}
+
+const CDN = {
+  html2canvas: "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",
+  jspdf: "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
+  xlsx: "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js",
+};
+
+/* 出力用に、店名を完全表示（改行可）・ステータスバー無しのクローンを生成 */
+function buildPrintable(kind) {
+  const root = document.createElement("div");
+  root.className = "print-root";
+  const title = document.createElement("h2");
+  title.className = "print-title";
+  title.textContent = `アーバンネット 出店スケジュール ${monthLabel(state.calYear, state.calMonth)}` +
+    (kind === "list" ? "（リスト）" : "（カレンダー）");
+  root.appendChild(title);
+  root.appendChild(kind === "list" ? buildPrintableList() : buildPrintableCalendar());
+  return root;
+}
+
+function buildPrintableCalendar() {
+  const y = state.calYear, m0 = state.calMonth;
+  const firstDow = new Date(y, m0, 1).getDay();
+  const daysInMonth = new Date(y, m0 + 1, 0).getDate();
+  const dows = ["日", "月", "火", "水", "木", "金", "土"];
+
+  const table = document.createElement("table");
+  table.className = "print-cal";
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  for (let i = 0; i < 7; i++) {
+    const th = document.createElement("th");
+    th.textContent = dows[i];
+    if (i === 0) th.className = "sun";
+    if (i === 6) th.className = "sat";
+    htr.appendChild(th);
+  }
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  let tr = document.createElement("tr");
+  for (let i = 0; i < firstDow; i++) tr.appendChild(document.createElement("td"));
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    if ((firstDow + d - 1) % 7 === 0 && d !== 1) { tbody.appendChild(tr); tr = document.createElement("tr"); }
+    const dateStr = ymd(y, m0, d);
+    const dow = dayOfWeek(y, m0, d);
+    const weekend = dow === 0 || dow === 6;
+    const isHoliday = state.holidays.has(dateStr) || JP_HOLIDAYS.has(dateStr) || weekend;
+    const list = state.openings[dateStr] || [];
+
+    const td = document.createElement("td");
+    if (isHoliday) td.className = "holiday";
+    const dnum = document.createElement("div");
+    dnum.className = "pc-date";
+    dnum.textContent = d;
+    td.appendChild(dnum);
+    if (isHoliday && list.length === 0) {
+      const h = document.createElement("div");
+      h.className = "pc-holiday";
+      h.textContent = "休";
+      td.appendChild(h);
+    }
+    for (const o of list) {
+      const v = document.createElement("div");
+      v.className = "pc-vendor";
+      v.textContent = vendorName(o.vendor_id); // 改行可・完全表示
+      td.appendChild(v);
+    }
+    tr.appendChild(td);
+  }
+  while (tr.children.length < 7) tr.appendChild(document.createElement("td"));
+  tbody.appendChild(tr);
+  table.appendChild(tbody);
+  return table;
+}
+
+function buildPrintableList() {
+  const y = state.calYear, m0 = state.calMonth;
+  const daysInMonth = new Date(y, m0 + 1, 0).getDate();
+  const dows = ["日", "月", "火", "水", "木", "金", "土"];
+
+  const table = document.createElement("table");
+  table.className = "print-list";
+  const tbody = document.createElement("tbody");
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = ymd(y, m0, d);
+    const dow = dayOfWeek(y, m0, d);
+    const weekend = dow === 0 || dow === 6;
+    const isHoliday = state.holidays.has(dateStr) || JP_HOLIDAYS.has(dateStr) || weekend;
+    const list = state.openings[dateStr] || [];
+    if (isHoliday && list.length === 0) continue;
+
+    const tr = document.createElement("tr");
+    const tdDate = document.createElement("td");
+    tdDate.className = "pl-date";
+    tdDate.textContent = `${m0 + 1}/${d}（${dows[dow]}）`;
+    const tdStatus = document.createElement("td");
+    tdStatus.className = "pl-status";
+    tdStatus.textContent = isHoliday ? "休日" : (STATUS_LABEL[statusClass(list.length)] || "");
+    const tdVendors = document.createElement("td");
+    tdVendors.className = "pl-vendors";
+    tdVendors.textContent = list.length ? list.map((o) => vendorName(o.vendor_id)).join("、") : (isHoliday ? "" : "出店者なし");
+    tr.append(tdDate, tdStatus, tdVendors);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+/* オフスクリーンに描画してhtml2canvasでcanvas化 */
+async function renderPrintableToCanvas(kind) {
+  await loadScript(CDN.html2canvas);
+  const holder = document.createElement("div");
+  holder.className = "print-holder";
+  holder.appendChild(buildPrintable(kind));
+  document.body.appendChild(holder);
+  try {
+    const canvas = await window.html2canvas(holder.firstChild, { scale: 2, backgroundColor: "#ffffff", logging: false });
+    return canvas;
+  } finally {
+    holder.remove();
+  }
+}
+
+function exportFileName(kind, ext) {
+  return `アーバンネット_${state.calYear}年${state.calMonth + 1}月_${kind === "list" ? "リスト" : "カレンダー"}.${ext}`;
+}
+
+async function exportImage(kind) {
+  toast("画像を生成中…");
+  try {
+    const canvas = await renderPrintableToCanvas(kind);
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = exportFileName(kind, "png");
+    a.click();
+    toast("画像を出力しました");
+  } catch (err) {
+    toast("画像の出力に失敗しました：" + err.message, true);
+  }
+}
+
+async function exportPDF(kind) {
+  toast("PDFを生成中…");
+  try {
+    const canvas = await renderPrintableToCanvas(kind);
+    await loadScript(CDN.jspdf);
+    const { jsPDF } = window.jspdf;
+    const imgData = canvas.toDataURL("image/png");
+    const portrait = canvas.height >= canvas.width;
+    const pdf = new jsPDF({ orientation: portrait ? "p" : "l", unit: "mm", format: "a4" });
+    const pw = pdf.internal.pageSize.getWidth();
+    const ph = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const maxW = pw - margin * 2, maxH = ph - margin * 2;
+    let w = maxW, h = (canvas.height / canvas.width) * w;
+    if (h > maxH) { h = maxH; w = (canvas.width / canvas.height) * h; }
+    pdf.addImage(imgData, "PNG", (pw - w) / 2, margin, w, h);
+    pdf.save(exportFileName(kind, "pdf"));
+    toast("PDFを出力しました");
+  } catch (err) {
+    toast("PDFの出力に失敗しました：" + err.message, true);
+  }
+}
+
+async function exportFeesExcel() {
+  toast("Excelを生成中…");
+  try {
+    const openingsFlat = await fetchMonthOpenings(state.feeYear, state.feeMonth);
+    const fees = computeFees(openingsFlat);
+    await loadScript(CDN.xlsx);
+    const XLSX = window.XLSX;
+
+    const rows = state.vendors
+      .map((v) => ({ v, info: fees.get(v.id) }))
+      .filter((r) => r.info && r.info.count > 0)
+      .sort((a, b) => b.info.count - a.info.count);
+
+    const maxVisits = rows.reduce((m, r) => Math.max(m, r.info.count), 0);
+    const header = ["出店者", "出店回数"];
+    for (let i = 1; i <= maxVisits; i++) header.push(`${i}回目`);
+    header.push("出店料合計（税別）");
+
+    const aoa = [header];
+    let grandTotal = 0;
+    for (const { v, info } of rows) {
+      const row = [v.name, info.count];
+      for (let i = 0; i < maxVisits; i++) {
+        const pv = info.perVisit[i];
+        row.push(pv ? pv.fee : "");
+      }
+      row.push(info.fee);
+      grandTotal += info.fee;
+      aoa.push(row);
+    }
+    const totalRow = ["合計", rows.reduce((s, r) => s + r.info.count, 0)];
+    for (let i = 0; i < maxVisits; i++) totalRow.push("");
+    totalRow.push(grandTotal);
+    aoa.push(totalRow);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = header.map((_, i) => ({ wch: i === 0 ? 28 : 12 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `${state.feeYear}年${state.feeMonth + 1}月`);
+    XLSX.writeFile(wb, `アーバンネット_出店料_${state.feeYear}年${state.feeMonth + 1}月.xlsx`);
+    toast("Excelを出力しました");
+  } catch (err) {
+    toast("Excelの出力に失敗しました：" + err.message, true);
+  }
+}
+
+/* ---------------- Sales analytics view ---------------- */
+async function renderAnalytics() {
+  $("#analytics-month-label").textContent = monthLabel(state.calYear, state.calMonth);
+  const wrap = $("#analytics-container");
+  wrap.innerHTML = '<div class="fees-empty">集計中…</div>';
+
+  const y = state.calYear, m0 = state.calMonth;
+  const pm = m0 === 0 ? 11 : m0 - 1;
+  const py = m0 === 0 ? y - 1 : y;
+
+  let cur, prev;
+  try {
+    [cur, prev] = await Promise.all([fetchMonthOpenings(y, m0), fetchMonthOpenings(py, pm)]);
+  } catch (err) {
+    wrap.innerHTML = `<div class="fees-empty">読み込みに失敗しました：${err.message}</div>`;
+    return;
+  }
+
+  // 出店者ごとの平均売上（売上入力のある回のみを母数にする）
+  const avgByVendor = (openings) => {
+    const acc = new Map(); // vendor_id -> {sum, n}
+    for (const o of openings) {
+      if (o.sales == null) continue;
+      if (!acc.has(o.vendor_id)) acc.set(o.vendor_id, { sum: 0, n: 0 });
+      const a = acc.get(o.vendor_id);
+      a.sum += o.sales; a.n++;
+    }
+    const out = new Map();
+    for (const [id, a] of acc) out.set(id, { avg: a.sum / a.n, n: a.n });
+    return out;
+  };
+
+  const curAvg = avgByVendor(cur);
+  const prevAvg = avgByVendor(prev);
+
+  // 全体平均（出店者平均の平均）
+  const overall = (map) => {
+    if (map.size === 0) return null;
+    let s = 0; for (const { avg } of map.values()) s += avg;
+    return s / map.size;
+  };
+  const curOverall = overall(curAvg);
+  const prevOverall = overall(prevAvg);
+
+  wrap.innerHTML = "";
+
+  // サマリーカード：今月平均 vs 先月平均
+  const summary = document.createElement("div");
+  summary.className = "analytics-summary";
+  summary.appendChild(metricCard("今月の平均売上", curOverall));
+  summary.appendChild(metricCard("先月の平均売上", prevOverall));
+  const diff = (curOverall != null && prevOverall != null) ? curOverall - prevOverall : null;
+  summary.appendChild(metricCard("前月差", diff, true));
+  wrap.appendChild(summary);
+
+  // 出店者別：今月平均・先月平均・差異
+  const ids = new Set([...curAvg.keys(), ...prevAvg.keys()]);
+  if (ids.size === 0) {
+    const e = document.createElement("div");
+    e.className = "fees-empty";
+    e.textContent = "売上実績がまだ入力されていません。日付セルから各出店者の売上を入力してください。";
+    wrap.appendChild(e);
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "analytics-card glass";
+  const table = document.createElement("table");
+  table.className = "analytics-table";
+  table.innerHTML =
+    "<thead><tr><th>出店者</th><th class='num'>今月平均</th><th class='num'>先月平均</th><th class='num'>差異</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+
+  const list = [...ids].map((id) => {
+    const c = curAvg.get(id), p = prevAvg.get(id);
+    return { id, cur: c ? c.avg : null, prev: p ? p.avg : null };
+  }).sort((a, b) => (b.cur ?? -1) - (a.cur ?? -1));
+
+  for (const r of list) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = vendorName(r.id);
+    const tc = document.createElement("td"); tc.className = "num"; tc.textContent = yen(r.cur);
+    const tp = document.createElement("td"); tp.className = "num"; tp.textContent = yen(r.prev);
+    const td = document.createElement("td"); td.className = "num";
+    if (r.cur != null && r.prev != null) {
+      const d = r.cur - r.prev;
+      td.textContent = (d >= 0 ? "+" : "−") + "¥" + Math.abs(Math.round(d)).toLocaleString();
+      td.classList.add(d >= 0 ? "pos" : "neg");
+      // 差異バー
+      const bar = document.createElement("div");
+      bar.className = "diff-bar " + (d >= 0 ? "pos" : "neg");
+      const pct = r.prev > 0 ? Math.min(100, Math.abs(d) / r.prev * 100) : 100;
+      bar.style.width = pct + "%";
+      td.appendChild(bar);
+    } else {
+      td.textContent = "—";
+    }
+    tr.append(name, tc, tp, td);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  card.appendChild(table);
+  wrap.appendChild(card);
+}
+
+function yen(v) { return v == null ? "—" : "¥" + Math.round(v).toLocaleString(); }
+
+function metricCard(label, value, signed = false) {
+  const c = document.createElement("div");
+  c.className = "metric-card glass";
+  const l = document.createElement("div"); l.className = "metric-label"; l.textContent = label;
+  const v = document.createElement("div"); v.className = "metric-value";
+  if (value == null) { v.textContent = "—"; }
+  else if (signed) {
+    v.textContent = (value >= 0 ? "+" : "−") + "¥" + Math.abs(Math.round(value)).toLocaleString();
+    v.classList.add(value >= 0 ? "pos" : "neg");
+  } else {
+    v.textContent = "¥" + Math.round(value).toLocaleString();
+  }
+  c.append(l, v);
+  return c;
+}
+
 /* ---------------- View switching ---------------- */
 function switchView(view) {
   state.view = view;
@@ -568,16 +1051,19 @@ function switchView(view) {
   $("#view-calendar").classList.toggle("active", view === "calendar");
   $("#view-list").classList.toggle("active", view === "list");
   $("#view-fees").classList.toggle("active", view === "fees");
-  // カレンダービューはスクロール不要なので画面内に収める（リスト/出店料はスクロール可）
+  $("#view-analytics").classList.toggle("active", view === "analytics");
+  // カレンダービューはスクロール不要なので画面内に収める（他ビューはスクロール可）
   document.body.classList.toggle("calendar-view", view === "calendar");
   if (view === "fees") renderFees();
   if (view === "list") renderList();
+  if (view === "analytics") renderAnalytics();
 }
 
-/* カレンダーとリストの両方を更新（同じ月データを共有） */
+/* カレンダー・リスト・分析を更新（同じ月データを共有） */
 function refreshCalendarViews() {
   renderCalendar();
   if (state.view === "list") renderList();
+  if (state.view === "analytics") renderAnalytics();
 }
 
 async function changeCalMonth(delta) {
@@ -622,6 +1108,17 @@ function wireEvents() {
 
   $("#fee-prev-month").addEventListener("click", () => changeFeeMonth(-1));
   $("#fee-next-month").addEventListener("click", () => changeFeeMonth(1));
+
+  // 分析ビューのツールバー（カレンダーと同じ月を共有）
+  $("#analytics-prev-month").addEventListener("click", () => changeCalMonth(-1));
+  $("#analytics-next-month").addEventListener("click", () => changeCalMonth(1));
+
+  // 出力ボタン（アイコン）
+  $("#cal-export-img").addEventListener("click", () => exportImage("calendar"));
+  $("#cal-export-pdf").addEventListener("click", () => exportPDF("calendar"));
+  $("#list-export-img").addEventListener("click", () => exportImage("list"));
+  $("#list-export-pdf").addEventListener("click", () => exportPDF("list"));
+  $("#fee-export-xlsx").addEventListener("click", exportFeesExcel);
 
   $("#manage-vendors-btn").addEventListener("click", openVendorModal);
   $("#add-vendor-btn").addEventListener("click", addVendor);
