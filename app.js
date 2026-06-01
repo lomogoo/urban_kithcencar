@@ -1024,12 +1024,13 @@ async function exportReportWord() {
     });
 
     const doc = new Document({
-      styles: { default: { document: { run: { font: FONT, size: 21 } } } },
+      // フォントサイズ（half-point）：その他=9pt(18)・宛名=11pt(22)・見出し=12pt(24)
+      styles: { default: { document: { run: { font: FONT, size: 18 } } } },
       sections: [
         {
           children: [
-            // 宛名（そのまま）
-            para("NTT都市開発株式会社　御中", { size: 28, bold: true }),
+            // 宛名（そのまま）11pt
+            para("NTT都市開発株式会社　御中", { size: 22, bold: true }),
             para(""),
             // 差出人（右寄せ・そのまま）
             para("株式会社ユーメディア", { alignment: AlignmentType.RIGHT }),
@@ -1037,10 +1038,10 @@ async function exportReportWord() {
             para("宮城県仙台市若林区土樋103", { alignment: AlignmentType.RIGHT }),
             para("営業担当：吉田陸人", { alignment: AlignmentType.RIGHT }),
             para(""),
-            // タイトル（そのまま）
+            // タイトル＝見出し（そのまま）12pt
             para("業務完了報告書", {
               alignment: AlignmentType.CENTER,
-              size: 32,
+              size: 24,
               bold: true,
               spacing: { before: 120, after: 240 },
             }),
