@@ -711,6 +711,7 @@ const CDN = {
   html2canvas: "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",
   jspdf: "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
   xlsx: "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js",
+  docx: "https://cdn.jsdelivr.net/npm/docx@7.8.2/build/index.js",
 };
 
 /* 出力用に、店名を完全表示（改行可）・ステータスバー無しのクローンを生成 */
@@ -920,6 +921,149 @@ async function exportFeesExcel() {
   }
 }
 
+/* ---------------- 業務完了報告書（Word）出力 ---------------- */
+const REPORT_DOWS = ["日", "月", "火", "水", "木", "金", "土"];
+
+/* 表示中の月（カレンダー／リストと同じ）から報告書用データを組み立てる */
+function buildReportData() {
+  const y = state.calYear, m0 = state.calMonth;
+  const month = m0 + 1;
+  const lastDay = new Date(y, m0 + 1, 0).getDate();
+
+  // 出店者が存在する日を日付順に収集
+  const days = [];
+  for (let d = 1; d <= lastDay; d++) {
+    const list = state.openings[ymd(y, m0, d)] || [];
+    if (list.length === 0) continue;
+    days.push({
+      d,
+      dow: dayOfWeek(y, m0, d),
+      names: list.map((o) => vendorName(o.vendor_id)),
+    });
+  }
+
+  const openDays = days.length; // 【出店日】出店者が存在している日数
+  const totalVisits = days.reduce((s, x) => s + x.names.length, 0); // 【出店台数】当月の延べ出店回数
+  const breakdown = days.map(
+    (x) => `${month}月${x.d}日(${REPORT_DOWS[x.dow]}): ${x.names.join("、")}`
+  );
+
+  return {
+    year: y,
+    month,
+    lastDay,
+    subject: `${y}年${month}月アーバンネット仙台中央ビル　平日キッチンカー出店`,
+    period: `${y}年${month}月1日～${lastDay}日`,
+    workHours: "平日11時～14時",
+    openDays,
+    totalVisits,
+    breakdown,
+  };
+}
+
+async function exportReportWord() {
+  toast("業務完了報告書を生成中…");
+  try {
+    const r = buildReportData();
+    await loadScript(CDN.docx);
+    const D = window.docx;
+    const {
+      Document, Packer, Paragraph, TextRun, AlignmentType,
+      Table, TableRow, TableCell, WidthType, BorderStyle, VerticalAlign,
+    } = D;
+
+    const FONT = "游ゴシック";
+
+    const run = (text, opts = {}) => new TextRun({ text, font: FONT, ...opts });
+    const para = (text, opts = {}) => {
+      const { alignment, spacing, ...runOpts } = opts;
+      return new Paragraph({
+        alignment,
+        spacing,
+        children: text === "" ? [] : [run(text, runOpts)],
+      });
+    };
+
+    // 罫線スタイル（業務内容欄の表）
+    const thinBorder = { style: BorderStyle.SINGLE, size: 4, color: "000000" };
+    const cellBorders = {
+      top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder,
+    };
+
+    const labelCell = (label) =>
+      new TableCell({
+        width: { size: 20, type: WidthType.PERCENTAGE },
+        borders: cellBorders,
+        verticalAlign: VerticalAlign.CENTER,
+        children: [para(label, { bold: true })],
+      });
+    const valueCell = (children) =>
+      new TableCell({
+        width: { size: 80, type: WidthType.PERCENTAGE },
+        borders: cellBorders,
+        verticalAlign: VerticalAlign.CENTER,
+        children,
+      });
+
+    // 業務内容セルの中身
+    const contentParas = [
+      para(`【出店日】${r.openDays}日間　【出店台数】${r.totalVisits}台`),
+      para("内訳："),
+      ...r.breakdown.map((line) => para(line)),
+    ];
+
+    const infoTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({ children: [labelCell("件　名"), valueCell([para(r.subject)])] }),
+        new TableRow({ children: [labelCell("業務期間"), valueCell([para(r.period)])] }),
+        new TableRow({ children: [labelCell("業務時間"), valueCell([para(r.workHours)])] }),
+        new TableRow({ children: [labelCell("業務内容"), valueCell(contentParas)] }),
+        new TableRow({ children: [labelCell("特記事項"), valueCell([para("")])] }),
+      ],
+    });
+
+    const doc = new Document({
+      styles: { default: { document: { run: { font: FONT, size: 21 } } } },
+      sections: [
+        {
+          children: [
+            // 宛名（そのまま）
+            para("NTT都市開発株式会社　御中", { size: 28, bold: true }),
+            para(""),
+            // 差出人（右寄せ・そのまま）
+            para("株式会社ユーメディア", { alignment: AlignmentType.RIGHT }),
+            para("〒984-8545", { alignment: AlignmentType.RIGHT }),
+            para("宮城県仙台市若林区土樋103", { alignment: AlignmentType.RIGHT }),
+            para("営業担当：吉田陸人", { alignment: AlignmentType.RIGHT }),
+            para(""),
+            // タイトル（そのまま）
+            para("業務完了報告書", {
+              alignment: AlignmentType.CENTER,
+              size: 32,
+              bold: true,
+              spacing: { before: 120, after: 240 },
+            }),
+            para("上記のとおり業務を完了いたしました。", { spacing: { after: 240 } }),
+            infoTable,
+          ],
+        },
+      ],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `アーバンネット_業務完了報告書_${r.year}年${r.month}月.docx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("業務完了報告書を出力しました");
+  } catch (err) {
+    toast("業務完了報告書の出力に失敗しました：" + err.message, true);
+  }
+}
+
 /* ---------------- Sales analytics view ---------------- */
 async function renderAnalytics() {
   $("#analytics-month-label").textContent = monthLabel(state.calYear, state.calMonth);
@@ -1118,6 +1262,7 @@ function wireEvents() {
   $("#cal-export-pdf").addEventListener("click", () => exportPDF("calendar"));
   $("#list-export-img").addEventListener("click", () => exportImage("list"));
   $("#list-export-pdf").addEventListener("click", () => exportPDF("list"));
+  $("#list-export-report").addEventListener("click", exportReportWord);
   $("#fee-export-xlsx").addEventListener("click", exportFeesExcel);
 
   $("#manage-vendors-btn").addEventListener("click", openVendorModal);
