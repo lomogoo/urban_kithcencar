@@ -761,6 +761,30 @@ body.calendar-view .cell { min-height: 0; }
   white-space: normal;       /* 改行を許可し完全表示 */
 }
 
+/* ---------- 出店キャンセル表示 ---------- */
+.v-tag.cancelled,
+.list-vendor.cancelled,
+.pc-vendor.cancelled {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+.v-tag.cancelled { color: var(--ink-3); background: rgba(120, 120, 128, 0.12); }
+.list-vendor.cancelled { color: var(--ink-3); background: rgba(120, 120, 128, 0.18); }
+.pc-vendor.cancelled { color: #8a8a8e; background: #f0f0f2; }
+.vendor-entry.cancelled .ve-name { text-decoration: line-through; color: var(--ink-3); }
+.ve-cancel-tag {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--status-open);
+  border-radius: 6px;
+  padding: 1px 7px;
+  text-decoration: none;
+  vertical-align: middle;
+}
+.ve-cancel .ve-check { accent-color: var(--status-open); }
+
 .print-list { width: 100%; border-collapse: collapse; }
 .print-list td { border-bottom: 1px solid #e2e4e9; padding: 9px 10px; font-size: 14px; vertical-align: top; }
 .print-list .pl-date { width: 110px; font-weight: 700; white-space: nowrap; }
