@@ -937,30 +937,44 @@ async function exportFeesExcel() {
       .filter((r) => r.info && r.info.count > 0)
       .sort((a, b) => b.info.count - a.info.count);
 
-    const maxVisits = rows.reduce((m, r) => Math.max(m, r.info.count), 0);
-    const header = ["出店者", "出店回数"];
-    for (let i = 1; i <= maxVisits; i++) header.push(`${i}回目`);
-    header.push("出店料合計（税別）");
+    const fmtDate = (iso) => {
+      const [yy, mm, dd] = iso.split("-").map(Number);
+      return `${yy}/${mm}/${dd}`;
+    };
 
+    // A:出店者名 / B:出店日 / C:その日の出店料（税別） / D:合計請求額（税別）
+    const header = ["出店者", "出店日", "出店料（税別）", "合計請求額（税別）"];
     const aoa = [header];
+    const merges = [];
     let grandTotal = 0;
+
     for (const { v, info } of rows) {
-      const row = [v.name, info.count];
-      for (let i = 0; i < maxVisits; i++) {
-        const pv = info.perVisit[i];
-        row.push(pv ? pv.fee : "");
+      const start = aoa.length; // この出店者の最初の行
+      const visits = info.perVisit; // 出店回数分（キャンセルは除外済み・日付順）
+      visits.forEach((pv, i) => {
+        aoa.push([
+          i === 0 ? v.name : "",
+          fmtDate(pv.date),
+          pv.fee,
+          i === 0 ? info.fee : "",
+        ]);
+      });
+      // 出店者名（A列）と合計請求額（D列）は出店者ごとに縦結合
+      if (visits.length > 1) {
+        const end = start + visits.length - 1;
+        merges.push({ s: { r: start, c: 0 }, e: { r: end, c: 0 } });
+        merges.push({ s: { r: start, c: 3 }, e: { r: end, c: 3 } });
       }
-      row.push(info.fee);
       grandTotal += info.fee;
-      aoa.push(row);
     }
-    const totalRow = ["合計", rows.reduce((s, r) => s + r.info.count, 0)];
-    for (let i = 0; i < maxVisits; i++) totalRow.push("");
-    totalRow.push(grandTotal);
-    aoa.push(totalRow);
+
+    // 末尾に総合計行
+    aoa.push(["合計", "", "", grandTotal]);
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = header.map((_, i) => ({ wch: i === 0 ? 28 : 12 }));
+    ws["!merges"] = merges;
+    ws["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 18 }];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `${state.feeYear}年${state.feeMonth + 1}月`);
     XLSX.writeFile(wb, `アーバンネット_出店料_${state.feeYear}年${state.feeMonth + 1}月.xlsx`);
