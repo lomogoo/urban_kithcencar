@@ -128,7 +128,7 @@ function monthRange(y, m0) {
   return { start, end };
 }
 
-const OPENING_COLS = "id, opening_date, vendor_id, fee_free, sales";
+const OPENING_COLS = "id, opening_date, vendor_id, fee_free, sales, cancelled";
 
 function normalizeOpening(row) {
   return {
@@ -136,6 +136,7 @@ function normalizeOpening(row) {
     vendor_id: row.vendor_id,
     fee_free: row.fee_free ?? false,
     sales: row.sales ?? null,
+    cancelled: row.cancelled ?? false,
   };
 }
 
@@ -171,6 +172,13 @@ async function fetchMonthOpenings(y, m0) {
 }
 
 /* ---------------- Calendar rendering ---------------- */
+/* キャンセルされた出店は枠・料金にカウントしない（表示は残す） */
+function activeCount(list) {
+  let n = 0;
+  for (const o of list) if (!o.cancelled) n++;
+  return n;
+}
+
 function statusClass(count) {
   if (count >= 3) return "s-over";
   if (count === 2) return "s-full";
@@ -221,7 +229,7 @@ function renderCalendar() {
       cell.classList.add(weekend ? "weekend" : "holiday");
       if (list.length > 0) {
         // 万一、休日でも出店登録がある場合は色付けして表示
-        cell.classList.add(statusClass(list.length));
+        cell.classList.add(statusClass(activeCount(list)));
         appendVendorTags(cell, list);
       } else {
         const tag = document.createElement("div");
@@ -230,7 +238,7 @@ function renderCalendar() {
         cell.appendChild(tag);
       }
     } else {
-      cell.classList.add(statusClass(list.length));
+      cell.classList.add(statusClass(activeCount(list)));
       appendVendorTags(cell, list);
     }
 
@@ -245,8 +253,9 @@ function appendVendorTags(cell, list) {
   wrap.className = "vendors";
   for (const o of list) {
     const t = document.createElement("div");
-    t.className = "v-tag";
+    t.className = "v-tag" + (o.cancelled ? " cancelled" : "");
     t.textContent = vendorName(o.vendor_id);
+    if (o.cancelled) t.title = "出店キャンセル";
     wrap.appendChild(t);
   }
   cell.appendChild(wrap);
@@ -296,7 +305,7 @@ function renderList() {
     const body = document.createElement("div");
     body.className = "list-body";
 
-    const statusCls = isHoliday ? "s-holiday" : statusClass(list.length);
+    const statusCls = isHoliday ? "s-holiday" : statusClass(activeCount(list));
     const badge = document.createElement("span");
     badge.className = "list-status " + statusCls;
     badge.textContent = isHoliday ? "休日" : STATUS_LABEL[statusCls];
@@ -307,8 +316,8 @@ function renderList() {
       names.className = "list-vendors";
       for (const o of list) {
         const chip = document.createElement("span");
-        chip.className = "list-vendor";
-        chip.textContent = vendorName(o.vendor_id);
+        chip.className = "list-vendor" + (o.cancelled ? " cancelled" : "");
+        chip.textContent = o.cancelled ? `${vendorName(o.vendor_id)}（キャンセル）` : vendorName(o.vendor_id);
         names.appendChild(chip);
       }
       body.appendChild(names);
@@ -383,13 +392,19 @@ function renderDayVendorList() {
   } else {
     for (const o of list) {
       const li = document.createElement("li");
-      li.className = "vendor-entry";
+      li.className = "vendor-entry" + (o.cancelled ? " cancelled" : "");
 
       const head = document.createElement("div");
       head.className = "ve-head";
       const span = document.createElement("span");
       span.className = "ve-name";
       span.textContent = vendorName(o.vendor_id);
+      if (o.cancelled) {
+        const tag = document.createElement("span");
+        tag.className = "ve-cancel-tag";
+        tag.textContent = "キャンセル";
+        span.appendChild(tag);
+      }
       const btn = document.createElement("button");
       btn.className = "remove";
       btn.textContent = "×";
@@ -398,6 +413,19 @@ function renderDayVendorList() {
       head.append(span, btn);
       li.appendChild(head);
 
+      // 出店キャンセルトグル（チェックすると請求対象から除外）
+      const cancelRow = document.createElement("label");
+      cancelRow.className = "ve-row ve-cancel";
+      const cc = document.createElement("input");
+      cc.type = "checkbox";
+      cc.className = "ve-check";
+      cc.checked = !!o.cancelled;
+      cc.addEventListener("change", () => setOpeningCancelled(o, cc.checked));
+      const cancelLabel = document.createElement("span");
+      cancelLabel.textContent = "出店をキャンセル（出店料の請求なし）";
+      cancelRow.append(cc, cancelLabel);
+      li.appendChild(cancelRow);
+
       // 出店料無料トグル（この日のこの出店者を無料にする）
       const feeRow = document.createElement("label");
       feeRow.className = "ve-row";
@@ -405,6 +433,7 @@ function renderDayVendorList() {
       cb.type = "checkbox";
       cb.className = "ve-check";
       cb.checked = !!o.fee_free;
+      cb.disabled = !!o.cancelled;
       cb.addEventListener("change", () => setOpeningFeeFree(o, cb.checked));
       const feeLabel = document.createElement("span");
       feeLabel.textContent = "この日の出店料を無料にする";
@@ -438,13 +467,29 @@ function renderDayVendorList() {
   }
 
   const hint = $("#day-hint");
-  if (list.length >= 2) {
-    hint.textContent = list.length >= 3
+  const active = activeCount(list);
+  if (active >= 2) {
+    hint.textContent = active >= 3
       ? "⚠️ 3者以上が登録されています。調整が必要です。"
       : "この日は満員（2者）です。さらに追加すると要調整になります。";
   } else {
-    hint.textContent = `あと ${2 - list.length} 枠 空いています。`;
+    hint.textContent = `あと ${2 - active} 枠 空いています。`;
   }
+}
+
+async function setOpeningCancelled(opening, checked) {
+  const prev = opening.cancelled;
+  opening.cancelled = checked;
+  const { error } = await sb.from("openings").update({ cancelled: checked }).eq("id", opening.id);
+  if (error) {
+    opening.cancelled = prev;
+    renderDayVendorList();
+    toast("更新に失敗しました：" + error.message, true);
+    return;
+  }
+  renderDayVendorList();
+  refreshCalendarViews();
+  toast(checked ? "出店をキャンセルにしました（請求対象外）" : "キャンセルを解除しました");
 }
 
 async function setOpeningFeeFree(opening, checked) {
@@ -483,7 +528,7 @@ async function addOpeningToDay() {
   const date = state.selectedDate;
   const list = state.openings[date] || [];
 
-  if (list.length >= 2) {
+  if (activeCount(list) >= 2) {
     const ok = confirm("この日は既に2者が出店しています。3者以上は「要調整」になります。追加しますか？");
     if (!ok) return;
   }
@@ -597,7 +642,9 @@ function computeFees(openingsFlat) {
   }
 
   const result = new Map();
-  for (const [vendorId, list] of byVendor) {
+  for (const [vendorId, all] of byVendor) {
+    // キャンセル分は出店回数・請求の対象外（除外して集計）
+    const list = all.filter((o) => !o.cancelled);
     list.sort((a, b) => a.opening_date.localeCompare(b.opening_date));
     const exempt = isFeeExempt(vendorName(vendorId));
     let billableSoFar = 0;
@@ -773,8 +820,8 @@ function buildPrintableCalendar() {
     }
     for (const o of list) {
       const v = document.createElement("div");
-      v.className = "pc-vendor";
-      v.textContent = vendorName(o.vendor_id); // 改行可・完全表示
+      v.className = "pc-vendor" + (o.cancelled ? " cancelled" : "");
+      v.textContent = o.cancelled ? `${vendorName(o.vendor_id)}（キャンセル）` : vendorName(o.vendor_id); // 改行可・完全表示
       td.appendChild(v);
     }
     tr.appendChild(td);
@@ -808,10 +855,12 @@ function buildPrintableList() {
     tdDate.textContent = `${m0 + 1}/${d}（${dows[dow]}）`;
     const tdStatus = document.createElement("td");
     tdStatus.className = "pl-status";
-    tdStatus.textContent = isHoliday ? "休日" : (STATUS_LABEL[statusClass(list.length)] || "");
+    tdStatus.textContent = isHoliday ? "休日" : (STATUS_LABEL[statusClass(activeCount(list))] || "");
     const tdVendors = document.createElement("td");
     tdVendors.className = "pl-vendors";
-    tdVendors.textContent = list.length ? list.map((o) => vendorName(o.vendor_id)).join("、") : (isHoliday ? "" : "出店者なし");
+    tdVendors.textContent = list.length
+      ? list.map((o) => (o.cancelled ? `${vendorName(o.vendor_id)}（キャンセル）` : vendorName(o.vendor_id))).join("、")
+      : (isHoliday ? "" : "出店者なし");
     tr.append(tdDate, tdStatus, tdVendors);
     tbody.appendChild(tr);
   }
@@ -930,15 +979,16 @@ function buildReportData() {
   const month = m0 + 1;
   const lastDay = new Date(y, m0 + 1, 0).getDate();
 
-  // 出店者が存在する日を日付順に収集
+  // 出店者が存在する日を日付順に収集（キャンセル分は出店日・台数・内訳から除外）
   const days = [];
   for (let d = 1; d <= lastDay; d++) {
     const list = state.openings[ymd(y, m0, d)] || [];
-    if (list.length === 0) continue;
+    const active = list.filter((o) => !o.cancelled);
+    if (active.length === 0) continue;
     days.push({
       d,
       dow: dayOfWeek(y, m0, d),
-      names: list.map((o) => vendorName(o.vendor_id)),
+      names: active.map((o) => vendorName(o.vendor_id)),
     });
   }
 
@@ -1087,6 +1137,7 @@ async function renderAnalytics() {
   const avgByVendor = (openings) => {
     const acc = new Map(); // vendor_id -> {sum, n}
     for (const o of openings) {
+      if (o.cancelled) continue; // キャンセル分は売上分析の対象外
       if (o.sales == null) continue;
       if (!acc.has(o.vendor_id)) acc.set(o.vendor_id, { sum: 0, n: 0 });
       const a = acc.get(o.vendor_id);
