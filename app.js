@@ -1254,6 +1254,264 @@ function metricCard(label, value, signed = false) {
   return c;
 }
 
+/* ---------------- Sales analytics PDF export ---------------- */
+async function exportAnalyticsPDF() {
+  toast("PDFを生成中…");
+  try {
+    const y = state.calYear, m0 = state.calMonth;
+    const pm = m0 === 0 ? 11 : m0 - 1;
+    const py = m0 === 0 ? y - 1 : y;
+
+    let cur, prev;
+    [cur, prev] = await Promise.all([fetchMonthOpenings(y, m0), fetchMonthOpenings(py, pm)]);
+
+    const avgByVendor = (openings) => {
+      const acc = new Map();
+      for (const o of openings) {
+        if (o.sales == null) continue;
+        if (!acc.has(o.vendor_id)) acc.set(o.vendor_id, { sum: 0, n: 0 });
+        const a = acc.get(o.vendor_id);
+        a.sum += o.sales; a.n++;
+      }
+      const out = new Map();
+      for (const [id, a] of acc) out.set(id, { avg: a.sum / a.n, n: a.n });
+      return out;
+    };
+
+    const curAvg = avgByVendor(cur);
+    const prevAvg = avgByVendor(prev);
+
+    const overall = (map) => {
+      if (map.size === 0) return null;
+      let s = 0; for (const { avg } of map.values()) s += avg;
+      return s / map.size;
+    };
+    const curOverall = overall(curAvg);
+    const prevOverall = overall(prevAvg);
+
+    await loadScript(CDN.jspdf);
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+
+    // フォント設定（latin文字は標準フォントで代替、日本語はUnicode埋め込みが必要なため
+    // html要素のキャプチャ方式ではなくjsPDF autoTableで描画）
+    // jsPDF標準フォントは日本語非対応なので、テキストをcanvasに描画してから埋め込む方式を使う
+
+    const PW = doc.internal.pageSize.getWidth();   // 210mm
+    const PH = doc.internal.pageSize.getHeight();  // 297mm
+    const ML = 14, MR = 14, MT = 14;
+    const CW = PW - ML - MR;
+
+    // ---- ヘルパー: キャンバスにテキストを描いてPDFに画像として追加 ----
+    let curY = MT;
+
+    const addTextBlock = (() => {
+      // オフスクリーンキャンバスにテキストを描画してdoc.addImageで埋め込む
+      // 各ブロックはHTMLdivとして作成しhtml2canvasでラスタライズ
+      return null; // 下記の直接描画方式に置き換え
+    })();
+
+    // html2canvasを使い、分析UIセクションのコンテンツを描画する
+    // まず分析結果の専用printableHTMLを組み立てる
+    await loadScript(CDN.html2canvas);
+
+    const printEl = document.createElement("div");
+    printEl.style.cssText = `
+      position:fixed; left:-9999px; top:0;
+      width:794px; background:#fff; color:#111;
+      font-family:'Helvetica Neue',Arial,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+      font-size:13px; padding:32px;
+    `;
+
+    const fmtYen = (v) => v == null ? "—" : "¥" + Math.round(v).toLocaleString();
+    const fmtDiff = (v) => {
+      if (v == null) return "—";
+      return (v >= 0 ? "+" : "−") + "¥" + Math.abs(Math.round(v)).toLocaleString();
+    };
+    const diffColor = (v) => v == null ? "#555" : v >= 0 ? "#1a7a3a" : "#c0392b";
+
+    // タイトル
+    const title = document.createElement("h1");
+    title.style.cssText = "font-size:20px;font-weight:700;margin:0 0 24px;border-bottom:2px solid #111;padding-bottom:8px;";
+    title.textContent = `${y}年${m0 + 1}月 売上分析レポート`;
+    printEl.appendChild(title);
+
+    // ---- セクション1: サマリー ----
+    const sec1Title = document.createElement("h2");
+    sec1Title.style.cssText = "font-size:14px;font-weight:700;margin:0 0 12px;";
+    sec1Title.textContent = "サマリー";
+    printEl.appendChild(sec1Title);
+
+    const summaryGrid = document.createElement("div");
+    summaryGrid.style.cssText = "display:flex;gap:16px;margin-bottom:28px;";
+    const summaryItems = [
+      { label: "今月の平均売上", value: fmtYen(curOverall), color: "#111" },
+      { label: "先月の平均売上", value: fmtYen(prevOverall), color: "#111" },
+      {
+        label: "前月差",
+        value: fmtDiff(curOverall != null && prevOverall != null ? curOverall - prevOverall : null),
+        color: diffColor(curOverall != null && prevOverall != null ? curOverall - prevOverall : null),
+      },
+    ];
+    for (const item of summaryItems) {
+      const card = document.createElement("div");
+      card.style.cssText = "flex:1;border:1px solid #ccc;border-radius:8px;padding:16px;text-align:center;";
+      card.innerHTML = `<div style="font-size:11px;color:#666;margin-bottom:6px;">${item.label}</div>
+        <div style="font-size:22px;font-weight:700;color:${item.color};">${item.value}</div>`;
+      summaryGrid.appendChild(card);
+    }
+    printEl.appendChild(summaryGrid);
+
+    // ---- セクション2: 出店者別比較 ----
+    const sec2Title = document.createElement("h2");
+    sec2Title.style.cssText = "font-size:14px;font-weight:700;margin:0 0 12px;";
+    sec2Title.textContent = "出店者別 今月・先月平均比較";
+    printEl.appendChild(sec2Title);
+
+    const ids = new Set([...curAvg.keys(), ...prevAvg.keys()]);
+    if (ids.size > 0) {
+      const tbl = document.createElement("table");
+      tbl.style.cssText = "width:100%;border-collapse:collapse;margin-bottom:28px;font-size:12px;";
+      tbl.innerHTML = `<thead><tr style="background:#f0f0f0;">
+        <th style="padding:8px;text-align:left;border:1px solid #ccc;">出店者</th>
+        <th style="padding:8px;text-align:right;border:1px solid #ccc;">今月平均</th>
+        <th style="padding:8px;text-align:right;border:1px solid #ccc;">先月平均</th>
+        <th style="padding:8px;text-align:right;border:1px solid #ccc;">差異</th>
+      </tr></thead>`;
+      const tbody = document.createElement("tbody");
+      const vendorList = [...ids].map((id) => {
+        const c = curAvg.get(id), p = prevAvg.get(id);
+        return { id, cur: c ? c.avg : null, prev: p ? p.avg : null };
+      }).sort((a, b) => (b.cur ?? -1) - (a.cur ?? -1));
+      for (const r of vendorList) {
+        const d = r.cur != null && r.prev != null ? r.cur - r.prev : null;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td style="padding:7px 8px;border:1px solid #ccc;">${vendorName(r.id)}</td>
+          <td style="padding:7px 8px;text-align:right;border:1px solid #ccc;">${fmtYen(r.cur)}</td>
+          <td style="padding:7px 8px;text-align:right;border:1px solid #ccc;">${fmtYen(r.prev)}</td>
+          <td style="padding:7px 8px;text-align:right;border:1px solid #ccc;color:${diffColor(d)};font-weight:600;">${fmtDiff(d)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+      tbl.appendChild(tbody);
+      printEl.appendChild(tbl);
+    } else {
+      const empty = document.createElement("p");
+      empty.style.cssText = "color:#888;margin-bottom:28px;";
+      empty.textContent = "売上実績が入力されていません。";
+      printEl.appendChild(empty);
+    }
+
+    // ---- セクション3: 出店日別 売上実績（先月平均との比較） ----
+    const sec3Title = document.createElement("h2");
+    sec3Title.style.cssText = "font-size:14px;font-weight:700;margin:0 0 12px;";
+    sec3Title.textContent = "出店日別 売上実績（出店者ごとの先月平均との比較）";
+    printEl.appendChild(sec3Title);
+
+    // curを日付でグループ化
+    const DOW_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+    const byDate = new Map();
+    for (const o of cur) {
+      if (!byDate.has(o.opening_date)) byDate.set(o.opening_date, []);
+      byDate.get(o.opening_date).push(o);
+    }
+    const sortedDates = [...byDate.keys()].sort();
+
+    if (sortedDates.length === 0) {
+      const empty = document.createElement("p");
+      empty.style.cssText = "color:#888;";
+      empty.textContent = "今月の出店記録がありません。";
+      printEl.appendChild(empty);
+    } else {
+      const dateTbl = document.createElement("table");
+      dateTbl.style.cssText = "width:100%;border-collapse:collapse;font-size:12px;";
+      dateTbl.innerHTML = `<thead><tr style="background:#f0f0f0;">
+        <th style="padding:8px;text-align:left;border:1px solid #ccc;white-space:nowrap;">出店日</th>
+        <th style="padding:8px;text-align:left;border:1px solid #ccc;">出店者</th>
+        <th style="padding:8px;text-align:right;border:1px solid #ccc;">当日売上</th>
+        <th style="padding:8px;text-align:right;border:1px solid #ccc;">先月平均</th>
+        <th style="padding:8px;text-align:right;border:1px solid #ccc;">差異</th>
+      </tr></thead>`;
+      const dateTbody = document.createElement("tbody");
+
+      for (const dateStr of sortedDates) {
+        const openings = byDate.get(dateStr);
+        const d = new Date(dateStr + "T00:00:00");
+        const dateLabel = `${m0 + 1}/${d.getDate()}（${DOW_LABELS[d.getDay()]}）`;
+        let firstRow = true;
+        for (const o of openings) {
+          const pAvg = prevAvg.get(o.vendor_id);
+          const pVal = pAvg ? pAvg.avg : null;
+          const sales = o.sales;
+          const diff = sales != null && pVal != null ? sales - pVal : null;
+          const tr = document.createElement("tr");
+          const bg = firstRow ? "" : "";
+          tr.innerHTML = `
+            <td style="padding:7px 8px;border:1px solid #ccc;white-space:nowrap;">${firstRow ? dateLabel : ""}</td>
+            <td style="padding:7px 8px;border:1px solid #ccc;">${vendorName(o.vendor_id)}</td>
+            <td style="padding:7px 8px;text-align:right;border:1px solid #ccc;">${fmtYen(sales)}</td>
+            <td style="padding:7px 8px;text-align:right;border:1px solid #ccc;">${fmtYen(pVal)}</td>
+            <td style="padding:7px 8px;text-align:right;border:1px solid #ccc;color:${diffColor(diff)};font-weight:600;">${fmtDiff(diff)}</td>
+          `;
+          dateTbody.appendChild(tr);
+          firstRow = false;
+        }
+      }
+      dateTbl.appendChild(dateTbody);
+      printEl.appendChild(dateTbl);
+    }
+
+    document.body.appendChild(printEl);
+
+    // html2canvasでラスタライズ
+    const canvas = await window.html2canvas(printEl, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      width: printEl.scrollWidth,
+      height: printEl.scrollHeight,
+    });
+    document.body.removeChild(printEl);
+
+    const imgData = canvas.toDataURL("image/png");
+    const imgW = canvas.width;
+    const imgH = canvas.height;
+
+    // A4 (210×297mm) に収まるよう分割描画
+    const pageW = PW - ML - MR;
+    const pageH = PH - MT - 10; // bottom margin
+    const ratio = pageW / (imgW / 2); // scale: canvas is 2x
+    const scaledH = (imgH / 2) * ratio;
+
+    if (scaledH <= pageH) {
+      doc.addImage(imgData, "PNG", ML, MT, pageW, scaledH);
+    } else {
+      // 複数ページに分割
+      const pxPerPage = Math.floor((pageH / ratio) * 2); // canvas pixels per page
+      let offsetPx = 0;
+      while (offsetPx < imgH) {
+        if (offsetPx > 0) doc.addPage();
+        const sliceH = Math.min(pxPerPage, imgH - offsetPx);
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = imgW;
+        sliceCanvas.height = sliceH;
+        const ctx = sliceCanvas.getContext("2d");
+        ctx.drawImage(canvas, 0, offsetPx, imgW, sliceH, 0, 0, imgW, sliceH);
+        const sliceData = sliceCanvas.toDataURL("image/png");
+        const sliceScaledH = (sliceH / 2) * ratio;
+        doc.addImage(sliceData, "PNG", ML, MT, pageW, sliceScaledH);
+        offsetPx += sliceH;
+      }
+    }
+
+    doc.save(`アーバンネット_売上分析_${y}年${m0 + 1}月.pdf`);
+    toast("PDFを出力しました");
+  } catch (err) {
+    toast("PDFの出力に失敗しました：" + err.message, true);
+  }
+}
+
 /* ---------------- View switching ---------------- */
 function switchView(view) {
   state.view = view;
@@ -1330,6 +1588,7 @@ function wireEvents() {
   $("#list-export-pdf").addEventListener("click", () => exportPDF("list"));
   $("#list-export-report").addEventListener("click", exportReportWord);
   $("#fee-export-xlsx").addEventListener("click", exportFeesExcel);
+  $("#analytics-export-pdf").addEventListener("click", exportAnalyticsPDF);
 
   $("#manage-vendors-btn").addEventListener("click", openVendorModal);
   $("#add-vendor-btn").addEventListener("click", addVendor);
